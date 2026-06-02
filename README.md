@@ -41,6 +41,7 @@ The working GBC menu variable is:
 - `docs/how-it-works.md`: the openFPGA menu/register/HDL pattern.
 - `docs/build-and-install.md`: build and SD install checklist.
 - `docs/gba-stock-fast-forward.md`: stock GBA fast-forward and input remap notes.
+- `docs/gba-single-fast-forward-release.md`: GBA single-mode release notes.
 - `scripts/reverse-rbf-bits.py`: helper to convert Quartus `.rbf` to Pocket `.rbf_r`.
 - `scripts/verify-interact-speed-level.py`: checks an `interact.json` speed menu.
 
@@ -60,6 +61,18 @@ core package with:
 - release provenance notes
 
 It still excludes BIOS files, ROMs, saves, and SD user data.
+
+The `v0.1.0-gba-single-fastforward-alpha` release contains an installable GBA
+test core package with:
+
+- `Cores/mincer_ray.GBA/bitstream.rbf_r`
+- GBA core metadata
+- GBA platform metadata/image
+- SD folder scaffold and install notes
+
+This GBA build has one hold-to-fast-forward mode: hold Pocket right trigger for
+fast-forward, and use Pocket `Y` for the GBA `R` button. It does not include or
+embed a BIOS; `gba_bios.bin` is required from the user's SD card.
 
 ## Quick Start: GBC
 
@@ -117,9 +130,20 @@ this repo.
 
 ## GBA Status
 
-The GBA patch in this repo is experimental. It documents the same percent/list
-idea for `mincer-ray/openfpga-GBA`, but it still needs synthesis and hardware
-acceptance before it should be treated as proven.
+The GBA multi-speed patch in this repo is still experimental. It documents the
+same percent/list idea for `mincer-ray/openfpga-GBA`, but it still needs
+synthesis and hardware acceptance before it should be treated as proven.
+
+There is now a simpler compiled GBA alpha release that removes the menu/toggle
+fast-forward options and leaves exactly one mode:
+
+- Pocket right trigger: hold-to-fast-forward
+- Pocket `Y`: GBA `R`
+- Turbo removed
+- `gba_bios.bin` required on SD; no BIOS is embedded in the bitstream
+
+This is the normal SD-ROM GBA core path. It is not a physical cartridge adapter
+or cart-save alpha build.
 
 For stock GBA on Pocket, the useful proven path is input/settings based:
 

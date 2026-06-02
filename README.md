@@ -44,6 +44,23 @@ The working GBC menu variable is:
 - `scripts/reverse-rbf-bits.py`: helper to convert Quartus `.rbf` to Pocket `.rbf_r`.
 - `scripts/verify-interact-speed-level.py`: checks an `interact.json` speed menu.
 
+## Prebuilt Core Releases
+
+Compiled cores are published as GitHub Release assets instead of being committed
+directly to git history:
+
+https://github.com/editnori/analogue-pocket-fastforward-guide/releases
+
+The `v0.1.0-gbc-speed-level` release contains an installable GBC custom-speed
+core package with:
+
+- `Cores/budude2.GBC/gbc.rbf_r`
+- GBC core metadata
+- GBC platform metadata/image
+- release provenance notes
+
+It still excludes BIOS files, ROMs, saves, and SD user data.
+
 ## Quick Start: GBC
 
 ```bash

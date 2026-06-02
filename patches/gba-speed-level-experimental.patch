@@ -1,0 +1,171 @@
+--- a/pkg/Cores/mincer_ray.GBA/interact.json
++++ b/pkg/Cores/mincer_ray.GBA/interact.json
+@@ -77,6 +77,38 @@
+             "value": 1
+           }
+         ]
++      },
++      {
++        "name": "Speed Level",
++        "id": 40,
++        "type": "list",
++        "enabled": true,
++        "address": "0x8C",
++        "persist": true,
++        "writeonly": true,
++        "defaultval": 100,
++        "options": [
++          {
++            "name": "1x",
++            "value": 100
++          },
++          {
++            "name": "1.5x",
++            "value": 150
++          },
++          {
++            "name": "2x",
++            "value": 200
++          },
++          {
++            "name": "3x",
++            "value": 300
++          },
++          {
++            "name": "4x",
++            "value": 400
++          }
++        ]
+       }
+     ],
+     "messages": []
+--- a/scripts/build.sh
++++ b/scripts/build.sh
+@@ -8,7 +8,7 @@
+ RBF_R="$PROJECT_DIR/pkg/Cores/mincer_ray.GBA/bitstream.rbf_r"
+ 
+ echo "=== Starting Quartus build via Docker ==="
+-docker run --rm \
++${DOCKER_CMD:-docker} run --rm \
+   -v "$PROJECT_DIR":/build \
+   -w /build \
+   raetro/quartus:21.1 \
+--- a/src/fpga/core/core_top.sv
++++ b/src/fpga/core/core_top.sv
+@@ -1325,6 +1325,17 @@
+ reg [1:0] ff_mode = 0;    // 0 = Hold, 1 = Toggle, 2 = Disabled
+ reg force_rtc = 0;        // 0 = Off, 1 = Force enable RTC/GPIO
+ reg [1:0] turbo_mode = 0; // 0 = Disabled, 1 = Turbo A, 2 = Turbo B
++reg [9:0] speed_percent = 10'd100; // 100 = 1x, 150 = 1.5x, 200 = 2x, 300 = 3x, 400 = 4x
++logic [3:0] speed_step;
++always_comb begin
++    unique case (speed_percent)
++        10'd150: speed_step = 4'd3;
++        10'd200: speed_step = 4'd4;
++        10'd300: speed_step = 4'd6;
++        10'd400: speed_step = 4'd8;
++        default: speed_step = 4'd2;
++    endcase
++end
+ 
+ reg [13:0] reset_counter = 0;
+ wire       core_reset = (reset_counter != 0);
+@@ -1339,6 +1350,8 @@
+         32'h80: ff_mode    <= bridge_wr_data[1:0];
+         32'h84: force_rtc  <= bridge_wr_data[0];
+         32'h88: turbo_mode <= bridge_wr_data[1:0];
++        32'h8C: speed_percent <= (bridge_wr_data[9:0] < 10'd100) ? 10'd100 :
++                               (bridge_wr_data[9:0] > 10'd400) ? 10'd400 : bridge_wr_data[9:0];
+         endcase
+     end
+ end
+@@ -1346,11 +1359,16 @@
+ // ---- CDC: ff_mode, force_rtc, turbo_mode → clk_sys ----
+ wire [1:0] ff_mode_s;
+ synch_3 #(.WIDTH(2)) ff_mode_sync(ff_mode, ff_mode_s, clk_sys);
+ 
+ wire force_rtc_s;
+ synch_3 force_rtc_sync(force_rtc, force_rtc_s, clk_sys);
+ 
+ wire [1:0] turbo_mode_s;
+ synch_3 #(.WIDTH(2)) turbo_mode_sync(turbo_mode, turbo_mode_s, clk_sys);
++
++wire [3:0] speed_step_s;
++synch_3 #(.WIDTH(4)) speed_step_sync(speed_step, speed_step_s, clk_sys);
++
++// Fast-forward speed target. Normal play always stays at 1x.
+ 
+ // ============================================================
+@@ -1470,6 +1488,8 @@
+ wire fast_forward = (ff_mode_s == 2'd2) ? 1'b0 :            // Disabled
+                     (ff_mode_s == 2'd1) ? ff_toggle_state :  // Toggle
+                     ff_button;                               // Hold (default)
++
++wire [3:0] gba_speed_step_s = fast_forward ? speed_step_s : 4'd2;
+ 
+ 
+ // ============================================================
+@@ -1552,8 +1572,9 @@
+     .clk100              ( clk_sys ),
+     // Settings
+     .GBA_on              ( ~reset_gba ),
+-    .GBA_lockspeed       ( ~fast_forward ),
++    .GBA_lockspeed       ( 1'b1 ),
+     .GBA_cputurbo        ( 1'b0 ),
++    .GBA_speed_step      ( gba_speed_step_s ),
+     .GBA_flash_1m        ( det_flash_1m ),
+     .CyclePrecalc        ( 16'd100 ),
+     .Underclock          ( 2'b00 ),
+--- a/src/fpga/gba/gba_top.vhd
++++ b/src/fpga/gba/gba_top.vhd
+@@ -23,8 +23,9 @@
+       clk100                : in     std_logic;  
+       -- settings                 
+       GBA_on                : in     std_logic;  -- switching from off to on = reset
+-      GBA_lockspeed         : in     std_logic;  -- 1 = 100% speed, 0 = max speed
++      GBA_lockspeed         : in     std_logic;  -- 1 = paced speed, 0 = max speed
+       GBA_cputurbo          : in     std_logic;  -- 1 = cpu free running, all other 16 mhz
++      GBA_speed_step        : in     unsigned(3 downto 0); -- fixed-point speed step: 2 = 1x, 3 = 1.5x, 4 = 2x, 6 = 3x, 8 = 4x
+       GBA_flash_1m          : in     std_logic;  -- 1 when string "FLASH1M_V" is anywhere in gamepak
+       CyclePrecalc          : in     std_logic_vector(15 downto 0); -- 100 seems to be ok to keep fullspeed for all games
+       Underclock            : in     std_logic_vector(1 downto 0);
+@@ -301,7 +302,7 @@
+    -- signal IRP_Gamepak : std_logic; -- not implemented
+    
+    signal cycles_ahead    : integer range 0 to 131071 := 0;
+-   signal cycles_16_100   : integer range 0 to (SPEEDDIV - 1) := 0;
++   signal speed_rate_accum : unsigned(3 downto 0) := (others => '0');
+    signal new_missing     : std_logic := '0';
+    signal new_exact_cycle : std_logic := '0';
+    signal CyclesVsync     : unsigned(31 downto 0) := (others => '0');
+@@ -916,6 +917,7 @@
+    ------------- cycling
+    process (clk100)
+       variable new_cycles_ahead : integer range 0 to 1023;
++      variable speed_sum        : unsigned(4 downto 0);
+    begin
+       if rising_edge(clk100) then
+          
+@@ -927,16 +929,17 @@
+             new_cycles_ahead := new_cycles_ahead + to_integer(new_cycles);
+          end if;
+          
+-         if (cycles_16_100 < (SPEEDDIV - 1)) then
+-            cycles_16_100 <= cycles_16_100 + 1;
+-         else
+-            cycles_16_100   <= 0;
+-            new_exact_cycle <= '1';
++         speed_sum := ('0' & speed_rate_accum) + ('0' & GBA_speed_step);
++         if (speed_sum >= to_unsigned(SPEEDDIV * 2, speed_sum'length)) then
++            speed_rate_accum <= resize(speed_sum - to_unsigned(SPEEDDIV * 2, speed_sum'length), speed_rate_accum'length);
++            new_exact_cycle  <= '1';
+             if (new_cycles_ahead > 0) then
+                new_cycles_ahead := new_cycles_ahead - 1;
+             else
+                new_missing <= '1';
+             end if;
++         else
++            speed_rate_accum <= speed_sum(speed_rate_accum'range);
+          end if;
+          if (GBA_lockspeed = '1') then
+             cycles_ahead <= new_cycles_ahead;

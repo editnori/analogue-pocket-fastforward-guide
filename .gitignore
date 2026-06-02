@@ -1,0 +1,32 @@
+# Build outputs / bitstreams
+*.rbf
+*.rbf_r
+*.sof
+*.pof
+*.jic
+output_files/
+db/
+incremental_db/
+
+# BIOS / ROM / save payloads
+*.bin
+*.gb
+*.gbc
+*.gba
+*.sav
+*.srm
+*.sta
+*.zip
+*.7z
+
+# Local workspaces
+openfpga-GBC/
+openfpga-GBA/
+work/
+sd/
+
+# Python/cache/editor files
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
